@@ -98,10 +98,10 @@ app.post('/api/taxpayers/import', async (req, res) => {
       const row = normalize({
         business_name: item.business_name ?? item['Business Name'],
         category: item.category ?? item.Category,
-        sub_category: item.sub_category ?? item['Sub Category'],
-        financial_from_to: item.financial_from_to ?? item['Financial From & To'],
-        current_year_amount: item.current_year_amount ?? item['Current Year Amount'] ?? item['Cr Year Amount'],
-        arrears_amount: item.arrears_amount ?? item['Arrears Amount'] ?? item['Ars Amount'],
+        sub_category: item.sub_category ?? item['Sub-Category'] ?? item['Sub Category'],
+        financial_from_to: item.financial_from_to ?? item['Period From Financial Year To Financial Year'] ?? item['Financial From & To'],
+        current_year_amount: item.current_year_amount ?? item['Current Year Tax'] ?? item['Current Year Amount'] ?? item['Cr Year Amount'],
+        arrears_amount: item.arrears_amount ?? item['Arrears Years Tax'] ?? item['Arrears Amount'] ?? item['Ars Amount'],
         last_date: item.last_date ?? item['Last Date'],
         remarks: item.remarks ?? item.Remarks
       });
