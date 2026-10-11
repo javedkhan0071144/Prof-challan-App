@@ -32,7 +32,8 @@ function normalize(body) {
     financial_from_to: String(body.financial_from_to || '').trim(),
     current_year_amount: Number(body.current_year_amount || 0),
     arrears_amount: Number(body.arrears_amount || 0),
-    last_date: body.last_date || null
+    last_date: body.last_date || null,
+    remarks: String(body.remarks || '').trim()
   };
 }
 function validate(row) {
@@ -51,7 +52,7 @@ app.get('/api/taxpayers', async (req, res) => {
     const result = await pool.query(
       `SELECT id, sr_no, business_name, category, sub_category, financial_from_to,
        current_year_amount::float AS current_year_amount, arrears_amount::float AS arrears_amount,
-       (current_year_amount + arrears_amount)::float AS total_amount, last_date
+       (current_year_amount + arrears_amount)::float AS total_amount, last_date, remarks
        FROM taxpayers
        WHERE ($1 = '' OR business_name ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%' OR CAST(sr_no AS TEXT) = $1)
        ORDER BY sr_no NULLS LAST, id DESC`, [q]);
@@ -63,10 +64,10 @@ app.post('/api/taxpayers', async (req, res) => {
     const row = normalize(req.body); const error = validate(row);
     if (error) return res.status(400).json({ error });
     const result = await pool.query(
-      `INSERT INTO taxpayers (sr_no,business_name,category,sub_category,financial_from_to,current_year_amount,arrears_amount,last_date)
-       VALUES (COALESCE($1,(SELECT COALESCE(MAX(sr_no),0)+1 FROM taxpayers)),$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id,sr_no,business_name,category,sub_category,financial_from_to,current_year_amount::float,arrears_amount::float,(current_year_amount+arrears_amount)::float AS total_amount,last_date`,
-      [req.body.sr_no ? Number(req.body.sr_no) : null,row.business_name,row.category,row.sub_category,row.financial_from_to,row.current_year_amount,row.arrears_amount,row.last_date]);
+      `INSERT INTO taxpayers (sr_no,business_name,category,sub_category,financial_from_to,current_year_amount,arrears_amount,last_date,remarks)
+       VALUES (COALESCE($1,(SELECT COALESCE(MAX(sr_no),0)+1 FROM taxpayers)),$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING id,sr_no,business_name,category,sub_category,financial_from_to,current_year_amount::float,arrears_amount::float,(current_year_amount+arrears_amount)::float AS total_amount,last_date,remarks`,
+      [req.body.sr_no ? Number(req.body.sr_no) : null,row.business_name,row.category,row.sub_category,row.financial_from_to,row.current_year_amount,row.arrears_amount,row.last_date,row.remarks]);
     res.status(201).json(result.rows[0]);
   } catch (e) { res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'That Serial Number already exists.' : e.message }); }
 });
@@ -75,9 +76,9 @@ app.put('/api/taxpayers/:id', async (req, res) => {
     const row = normalize(req.body); const error = validate(row);
     if (error) return res.status(400).json({ error });
     const result = await pool.query(
-      `UPDATE taxpayers SET business_name=$1,category=$2,sub_category=$3,financial_from_to=$4,current_year_amount=$5,arrears_amount=$6,last_date=$7,updated_at=NOW()
-       WHERE id=$8 RETURNING id,sr_no,business_name,category,sub_category,financial_from_to,current_year_amount::float,arrears_amount::float,(current_year_amount+arrears_amount)::float AS total_amount,last_date`,
-      [row.business_name,row.category,row.sub_category,row.financial_from_to,row.current_year_amount,row.arrears_amount,row.last_date,req.params.id]);
+      `UPDATE taxpayers SET business_name=$1,category=$2,sub_category=$3,financial_from_to=$4,current_year_amount=$5,arrears_amount=$6,last_date=$7,remarks=$8,updated_at=NOW()
+       WHERE id=$9 RETURNING id,sr_no,business_name,category,sub_category,financial_from_to,current_year_amount::float,arrears_amount::float,(current_year_amount+arrears_amount)::float AS total_amount,last_date,remarks`,
+      [row.business_name,row.category,row.sub_category,row.financial_from_to,row.current_year_amount,row.arrears_amount,row.last_date,row.remarks,req.params.id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Record not found.' });
     res.json(result.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -97,19 +98,20 @@ app.post('/api/taxpayers/import', async (req, res) => {
       const row = normalize({
         business_name: item.business_name ?? item['Business Name'],
         category: item.category ?? item.Category,
-        sub_category: item.sub_category ?? item['Sub Category'],
-        financial_from_to: item.financial_from_to ?? item['Financial From & To'],
-        current_year_amount: item.current_year_amount ?? item['Current Year Amount'] ?? item['Cr Year Amount'],
-        arrears_amount: item.arrears_amount ?? item['Arrears Amount'] ?? item['Ars Amount'],
-        last_date: item.last_date ?? item['Last Date']
+        sub_category: item.sub_category ?? item['Sub-Category'] ?? item['Sub Category'],
+        financial_from_to: item.financial_from_to ?? item['Period From Financial Year To Financial Year'] ?? item['Financial From & To'],
+        current_year_amount: item.current_year_amount ?? item['Current Year Tax'] ?? item['Current Year Amount'] ?? item['Cr Year Amount'],
+        arrears_amount: item.arrears_amount ?? item['Arrears Years Tax'] ?? item['Arrears Amount'] ?? item['Ars Amount'],
+        last_date: item.last_date ?? item['Last Date'],
+        remarks: item.remarks ?? item.Remarks
       });
       if (!row.business_name || validate(row)) continue;
       const sr = Number(item.sr_no ?? item['Sr No']) || null;
       await client.query(
-        `INSERT INTO taxpayers (sr_no,business_name,category,sub_category,financial_from_to,current_year_amount,arrears_amount,last_date)
-         VALUES (COALESCE($1,(SELECT COALESCE(MAX(sr_no),0)+1 FROM taxpayers)),$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (sr_no) DO UPDATE SET business_name=EXCLUDED.business_name,category=EXCLUDED.category,sub_category=EXCLUDED.sub_category,financial_from_to=EXCLUDED.financial_from_to,current_year_amount=EXCLUDED.current_year_amount,arrears_amount=EXCLUDED.arrears_amount,last_date=EXCLUDED.last_date,updated_at=NOW()`,
-        [sr,row.business_name,row.category,row.sub_category,row.financial_from_to,row.current_year_amount,row.arrears_amount,row.last_date]);
+        `INSERT INTO taxpayers (sr_no,business_name,category,sub_category,financial_from_to,current_year_amount,arrears_amount,last_date,remarks)
+         VALUES (COALESCE($1,(SELECT COALESCE(MAX(sr_no),0)+1 FROM taxpayers)),$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (sr_no) DO UPDATE SET business_name=EXCLUDED.business_name,category=EXCLUDED.category,sub_category=EXCLUDED.sub_category,financial_from_to=EXCLUDED.financial_from_to,current_year_amount=EXCLUDED.current_year_amount,arrears_amount=EXCLUDED.arrears_amount,last_date=EXCLUDED.last_date,remarks=EXCLUDED.remarks,updated_at=NOW()`,
+        [sr,row.business_name,row.category,row.sub_category,row.financial_from_to,row.current_year_amount,row.arrears_amount,row.last_date,row.remarks]);
       count++;
     }
     await client.query('COMMIT'); res.json({ imported: count });
@@ -123,30 +125,31 @@ app.get('/api/taxpayers/:id/challan', async (req, res) => {
     const t = result.rows[0];
     const { jsPDF } = await import('jspdf');
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const copies = ['BANK COPY', 'DEPARTMENT COPY', 'TAXPAYER COPY'];
+    const copies = ['ASSESSEE COPY', 'BANK COPY', 'DEPARTMENT COPY'];
     const pageW = 297, margin = 7, gap = 3, cardW = (pageW - margin*2 - gap*2) / 3;
     copies.forEach((copy, i) => {
       const x = margin + i * (cardW + gap);
       pdf.setDrawColor(35, 70, 61); pdf.rect(x, 7, cardW, 194);
-      pdf.setFont('helvetica','bold'); pdf.setFontSize(11); pdf.text('PROFESSIONAL TAX CHALLAN', x+cardW/2, 16, {align:'center'});
-      pdf.setFontSize(9); pdf.text(copy, x+cardW/2, 23, {align:'center'});
-      pdf.setFont('helvetica','normal'); pdf.setFontSize(8);
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('PROFESSIONAL TAX CHALLAN', x+cardW/2, 16, {align:'center'});
+      pdf.setFontSize(8); pdf.text(copy, x+cardW/2, 23, {align:'center'});
       const fields = [
-        ['Serial No', String(t.sr_no ?? '')], ['Business Name', t.business_name], ['Category', t.category || ''],
-        ['Sub Category', t.sub_category || ''], ['Financial Year', t.financial_from_to || ''],
-        ['Current Year Amount', 'Rs. ' + money(t.current_year_amount)], ['Arrears Amount', 'Rs. ' + money(t.arrears_amount)],
-        ['Total Amount', 'Rs. ' + money(t.total_amount)], ['Last Date', t.last_date ? new Date(t.last_date).toLocaleDateString('en-GB') : '']
+        ['Sr No', String(t.sr_no ?? '')], ['Business Name', t.business_name], ['Category', t.category || ''],
+        ['Sub-Category', t.sub_category || ''], ['Period From Financial Year To Financial Year', t.financial_from_to || ''],
+        ['Current Year Tax', 'Rs. ' + money(t.current_year_amount)], ['Arrears Years Tax', 'Rs. ' + money(t.arrears_amount)],
+        ['Total Tax', 'Rs. ' + money(t.total_amount)], ['Last Date', t.last_date ? new Date(t.last_date).toLocaleDateString('en-GB') : ''],
+        ['Remarks', t.remarks || '']
       ];
-      let y = 35;
+      let y = 31;
       fields.forEach(([label, value]) => {
-        pdf.setFont('helvetica','bold'); pdf.text(label, x+4, y);
-        pdf.setFont('helvetica','normal');
-        const lines = pdf.splitTextToSize(String(value), cardW-8);
-        pdf.text(lines, x+4, y+5);
-        y += 15;
+        pdf.setFont('helvetica','bold'); pdf.setFontSize(7); pdf.text(label, x+4, y);
+        pdf.setFont('helvetica','normal'); pdf.setFontSize(7);
+        const lines = pdf.splitTextToSize(String(value || '—'), cardW-8);
+        pdf.text(lines, x+4, y+4);
+        y += 10 + Math.max(0, lines.length-1)*3;
       });
-      pdf.setFontSize(7); pdf.text('Bank stamp / signature: __________________', x+4, 183);
-      pdf.text('This is a system-generated challan.', x+4, 192);
+      pdf.setFont('helvetica','normal'); pdf.setFontSize(6.5);
+      pdf.text('Bank stamp / signature: __________________', x+4, 183);
+      pdf.text('System-generated challan', x+4, 192);
     });
     res.setHeader('Content-Type','application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="challan-${t.sr_no || t.id}.pdf"`);
