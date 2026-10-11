@@ -8,8 +8,10 @@ CREATE TABLE IF NOT EXISTS taxpayers (
   current_year_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   arrears_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   last_date DATE,
+  remarks TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS taxpayers_business_name_idx ON taxpayers (business_name);
 CREATE INDEX IF NOT EXISTS taxpayers_category_idx ON taxpayers (category);
+ALTER TABLE taxpayers ADD COLUMN IF NOT EXISTS remarks TEXT NOT NULL DEFAULT '';
